@@ -1,0 +1,182 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Jim Ammentorp"
+output: html_document
+keep_md: true
+---
+
+##Executive Summary
+
+This is the project for the Coursera course, Practical Machine Learning, with is part of Johns Hopkins University's Data Science Specialisation Certificate.  The goal of the project is to make a prediction of the manner in which a group of test subjects exercised. Raw data is prepared for analysis and then a predictive model is developed.  The predictive model is then cross validated against a separate sample.  Finally predictions are made on a small test sample. The predictive model proves to be very accurate.  The project is fully reproducible; The results can be automatically regenerated .
+
+##Background and Project Submission details
+
+The following section is copied from the course material as background for this project.
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+What you should submit
+
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did.
+
+##System Preparation
+
+###Load the necessary R libraries
+
+```{r}
+library(caret)
+library(randomForest)
+library(doParallel)
+```
+
+###Enable multi-core processing
+
+The processing required for this project an be CPU intensive, in particular the Random Forest algorithm.  To maximize processing capacity multiple CPUs are enabled.
+
+```{r}
+cl <- makeCluster(detectCores())
+registerDoParallel(cl)
+```
+
+
+
+###Set the working directory
+
+```{r}
+setwd("~/Practical Machine Learning")
+```
+
+
+##Data Preparation
+
+###Download data
+
+The links were provided within the project. The background of the data is explained aboved. 
+
+```{r}
+download.file("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", destfile="pml-training.csv")
+
+download.file("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", destfile="pml-testing.csv")
+```
+
+###Load data
+
+```{r}
+pml_training <- read.csv("pml-training.csv")
+
+pml_testing<- read.csv("pml-testing.csv")
+```
+
+
+###Inspect the loaded data
+
+As can bee seen, the training data set has 160 variables, many with missing values. It is best to do some data preparation.
+
+
+```{r}
+str(pml_training)
+```
+
+
+###Remove variables with low variability
+
+The data is analysed to find variables with near zero variance. These would not contribute to the modelling process and can be omitted.
+
+
+```{r}
+low_var <- nearZeroVar(pml_training, saveMetrics=TRUE)
+
+non_low_vars <- subset(low_var, !low_var$nzv) 
+
+training1 <- pml_training[rownames(non_low_vars)]
+```
+
+As can bee seen, this reduces the number of variables to 100. 
+
+```{r}
+dim(training1)
+```
+
+###Eliminate the variables with missing values
+
+The variables with data that is predominantly missing are eliminated. As can be seen, there are 41 columns that are predominantly missing (19216 out of 19622 rows).  There remains 59 variables.
+
+```{r}
+na_count <- summary(is.na(training1))
+
+na_count1 = sapply(training1, function(x) {sum(is.na(x))})
+
+cols_with_nas = names(na_count1[na_count1>18000])
+
+training2 = training1[, !names(training1) %in% cols_with_nas]
+
+dim(training2)
+```
+
+###Remove the first 6 variables
+
+The first 6 variables are removed as they are not useful. They contain descriptive information that would not be used in analysis. As can be seen, 53 variables now remain out of an original 160 variables.
+
+```{r}
+training3 <- training2[-c(1:6)]
+dim(training3)
+```
+
+
+###Split the training dataset into training and validation datasets
+
+The training dataset is split into training and validation datasets, on a 60/40 basis to allow for the model to be validated against a clean dataset.
+
+```{r}
+set.seed(738024)
+inTrain <- createDataPartition(y=training3$classe, p=0.6, list=FALSE)
+training <- training3[inTrain,]
+validation <- training3[-inTrain,]
+```
+
+##Modeling
+
+###Develop Random Forest Model
+
+Based on previous experience, a Random Forest model is chosen as a first method. The randomForest package was used as it can be more efficient than the Random Forest method in the caret package. A 10-fold cross validation was used as train control method.  Here is the result of the model and the importance of each predictor
+
+
+```{r}
+TC = trainControl(method = "cv", number = 10)
+
+RF <- randomForest(classe ~. , data=training, trControl = TC)
+print(RF)
+importance(RF)
+```
+
+
+###Model Validation and Out of Sample Error
+
+The out-of-sample error is the error realised by using the model developed on the training data  to make predictions on separate validation sample.  An estimate is that should be close to the OOB estimate of  error rate in the model. The cross validation shows the model to be very accurate, with an accuracy against the validation sample of 99.35%, with the out-of-sample error of 0.65% which is similar to the estimate.
+
+As this model shows such a good result, no further methods are examined. 
+
+```{r}
+pred_RF <- predict(RF, validation, type = "class")
+confusionMatrix(pred_RF, validation$classe)
+```
+
+##Generating the Submission
+
+The instructions from the project assignment were followed, to generate the answers and then use a macro to generate the 20 problem_id files that were subsequently uploaded individually to the course website. The model proved to be quite accurate, correctly predicting all 20 test cases.
+
+```{r}
+answers <- predict(RF, newdata = pml_testing)
+
+
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(answers)
+
+```
